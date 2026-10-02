@@ -19,3 +19,17 @@ en:
       request_failed: "Unable to reach the verification service."
       validate_failed: "Verification did not pass."
       invalid_challenge: "The verification session is invalid or expired."
+    admin:
+      title: "GeeTest CAPTCHA"
+      checks:
+        enabled: "Plugin is enabled"
+        captcha_id: "captcha_id is configured"
+        captcha_key: "captcha_key is configured"
+        scope: "At least one scenario is enabled"
+      test:
+        ok: "Endpoint reachable and request format accepted"
+        unreachable: "Cannot reach the GeeTest endpoint (%{reason})"
+        missing_credentials: "Configure captcha_id and captcha_key first"
+      errors:
+        unknown_scope: "Unknown verification scenario"
+

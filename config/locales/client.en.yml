@@ -10,3 +10,54 @@ en:
       error: "Verification error, please retry."
       closed: "Verification was closed before it was completed."
       server_failed: "Human verification failed. Please try again."
+      admin:
+        title: "GeeTest CAPTCHA"
+        nav_label: "GeeTest"
+        subtitle: "GeeTest CAPTCHA v4 (GT4) configuration and runtime status"
+        loading: "Loading…"
+        refresh: "Refresh"
+        save_failed: "The action failed. Please try again."
+        sections:
+          health: "Configuration health"
+          scopes: "Verification scenarios"
+          detail: "Configuration details"
+          test: "Connectivity test"
+          stats: "Verification statistics"
+        health_ok: "All good — verification is ready to use"
+        health_bad: "Configuration is incomplete, check the items below"
+        scopes:
+          signup: "Signup"
+          login: "Login"
+          post: "Topic / reply"
+        detail:
+          captcha_id: "captcha_id"
+          captcha_key: "captcha_key"
+          api_server: "API host"
+          product: "Display mode"
+          language: "UI language"
+          fail_open: "Fail open"
+          show_errors: "Show failure reason"
+          enabled: "Master switch"
+        values:
+          # Quoted deliberately: YAML 1.1 parses bare yes/no/on/off as
+          # booleans, which would break the i18n lookup.
+          "yes": "Configured"
+          "no": "Not set"
+          "on": "On"
+          "off": "Off"
+        test:
+          run: "Run test"
+          running: "Testing…"
+          reachable: "Endpoint reachable (%{ms} ms)"
+          unreachable: "Endpoint unreachable"
+        stats:
+          pass: "Passed"
+          fail: "Failed"
+          degraded: "Degraded"
+          missing: "Missing params"
+          total: "Total"
+          reset: "Reset statistics"
+          reset_confirm: "Clear all statistics? This cannot be undone."
+          window: "Last %{days} days"
+          empty: "No data yet"
+

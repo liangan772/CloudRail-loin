@@ -17,8 +17,10 @@
 - [目录结构](#目录结构)
 - [安装](#安装)
 - [配置项](#配置项)
+- [管理后台界面](#管理后台界面)
 - [安全设计](#安全设计)
 - [本地演示页](#本地演示页)
+- [关于 .hbs 弃用](#关于-hbs-弃用)
 - [测试](#测试)
 - [常见问题](#常见问题)
 - [参考文档](#参考文档)
@@ -36,6 +38,9 @@
 | 容灾降级 | 极验接口超时/异常时可放行，避免验证服务故障阻断正常业务 |
 | 多语言 | 验证界面语言可配，插件文案支持中英文 |
 | 不暴露密钥 | `captcha_key` 标记为 `secret`，仅服务端使用，绝不下发到客户端 |
+| **可视化管理后台** | 配置状态总览、场景开关直接操作、一键连通性测试、验证数据统计 |
+| **现代组件格式** | 前端使用 `.gjs`（非弃用的 `.hbs`），符合 Discourse 迁移方向 |
+
 
 ---
 
@@ -90,10 +95,14 @@
 | 文件 | 职责 |
 | --- | --- |
 | `client.rb` | 极验 HTTP 客户端：HMAC-SHA256 签名 + `POST /validate`，并把超时/异常归一化为结果对象 |
-| `validator.rb` | 编排层：参数校验 → 防重放消费 → 调极验 → 容灾降级策略 |
+| `validator.rb` | 编排层：参数校验 → 防重放消费 → 调极验 → 容灾降级策略 → 统计埋点 |
 | `verified_store.rb` | 基于 `Discourse.redis` 的 `lot_number` 一次性消费存储（TTL 10 分钟） |
+| `stats.rb` | 按天分桶的验证结果计数（通过/失败/降级/参数缺失），TTL 90 天 |
+| `connectivity_test.rb` | 管理后台的连通性探针：发一次故意非法的请求，判断接口是否可达 |
 | `controller_extension.rb` | 把 4 个自定义参数加入 strong parameters，并提供 `verify_geetest!` |
 | `guard.rb` | 把校验挂到 `SignupController` / `SessionController` / `PostsController` |
+| `admin_controller.rb` | 管理后台 JSON API：状态、统计、测试、开关切换 |
+
 
 ---
 
@@ -101,7 +110,7 @@
 
 ```
 discourse-geetest-captcha/
-├── plugin.rb                              # 插件入口
+├── plugin.rb                              # 插件入口（含管理路由）
 ├── config/
 │   ├── settings.yml                       # 站点设置定义
 │   └── locales/                           # 中英文文案
@@ -113,20 +122,33 @@ discourse-geetest-captcha/
 │   ├── client.rb                          # 极验 API 客户端
 │   ├── validator.rb                       # 二次校验编排
 │   ├── verified_store.rb                  # 防重放
+│   ├── stats.rb                           # 验证数据统计
+│   ├── connectivity_test.rb               # 连通性探针
 │   ├── controller_extension.rb            # 参数白名单 + 控制器 helper
-│   └── guard.rb                           # 各端点挂载
+│   ├── guard.rb                           # 各端点挂载
+│   └── admin_controller.rb                # 管理后台 API
 ├── assets/
 │   ├── javascripts/discourse/
+│   │   ├── geetest-captcha-route-map.js   # 注册 /admin/plugins/geetest-captcha 路由
 │   │   ├── initializers/geetest-captcha.js
+│   │   ├── components/
+│   │   │   └── geetest-captcha-admin.gjs  # 管理界面主组件（.gjs）
+│   │   ├── templates/admin/
+│   │   │   └── plugins-geetest-captcha.gjs# 管理页模板（.gjs）
 │   │   └── lib/
 │   │       ├── geetest-loader.js
 │   │       └── geetest-widget.js
-│   └── stylesheets/common/geetest-captcha.scss
+│   └── stylesheets/
+│       ├── common/geetest-captcha.scss
+│       └── admin/geetest-captcha-admin.scss
 ├── demo/index.html                        # 独立前端演示页
 └── spec/lib/                              # RSpec 测试
     ├── gt4_client_spec.rb
-    └── gt4_validator_spec.rb
+    ├── gt4_validator_spec.rb
+    ├── gt4_stats_spec.rb
+    └── gt4_admin_controller_spec.rb
 ```
+
 
 ---
 
@@ -190,6 +212,94 @@ git clone https://github.com/liangan772/CloudRail-loin.git discourse-geetest-cap
 
 ---
 
+## 管理后台界面
+
+除了 Discourse 内置的站点设置页，插件还提供了一个可视化管理页。
+
+**入口**：管理后台 → 插件 → **极验验证**，或直接访问
+`/admin/plugins/geetest-captcha`。
+
+页面包含四块内容：
+
+### 1. 配置状态总览
+
+一眼看清配置是否可用，逐项打勾/打叉：
+
+- 插件总开关是否开启
+- 是否已填写 `captcha_id`
+- 是否已填写 `captcha_key`
+- 是否至少启用了一个验证场景
+
+### 2. 验证场景开关
+
+直接在页面上切换总开关和注册 / 登录 / 发帖三个场景，**无需跳转到站点设置页**，
+点击即时生效（后端会同步重装校验拦截器）。
+
+### 3. 连通性测试
+
+点击「开始测试」后，服务端拿当前配置向极验接口发一次**故意非法**的校验请求。
+由于载荷是伪造的，一个**可达**的接口会返回校验失败而不是成功——我们真正验证的是
+DNS、TLS、路由是否通畅，以及请求格式是否被接受。页面会显示耗时与结果详情。
+
+### 4. 验证数据统计
+
+展示最近 1 / 7 / 30 天的四类计数：
+
+| 指标 | 含义 |
+| --- | --- |
+| 验证通过 | 极验确认验证成功 |
+| 验证失败 | 极验拒绝 |
+| 降级放行 | 极验接口不可达，走了容灾放行策略 |
+| 参数缺失 | 客户端未携带（或只携带部分）验证参数 |
+
+> **安全提示**：管理页返回的 `captcha_id` 会做脱敏处理（只显示前 4 位和后 4 位），
+> `captcha_key` 永不回显，只告知「已配置 / 未配置」。
+
+### 管理 API
+
+所有接口都要求管理员权限（`StaffConstraint`）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/admin/plugins/geetest-captcha/status.json` | 配置状态与健康检查 |
+| GET | `/admin/plugins/geetest-captcha/stats.json?days=7` | 统计数据 |
+| DELETE | `/admin/plugins/geetest-captcha/stats.json` | 清空统计 |
+| POST | `/admin/plugins/geetest-captcha/test.json` | 连通性测试 |
+| PUT | `/admin/plugins/geetest-captcha/toggle.json` | 切换场景开关 |
+
+---
+
+## 关于 .hbs 弃用
+
+Discourse 正在弃用主题/插件中 `.hbs` 模板文件扩展名，控制台会输出如下提示：
+
+```
+DEPRECATION NOTICE: The file '.../templates/xxx.hbs' uses the deprecated
+.hbs extension. Refactor it to use '.gjs' instead.
+[deprecation id: discourse.hbs-extension]
+```
+
+参考：<https://meta.discourse.org/t/deprecating-hbs-file-extension-in-themes-and-plugins/398896>
+
+本插件**不使用** `.hbs`，管理界面全部以现代的 **`.gjs`** 单文件组件格式编写：
+
+- 模板内联在 `<template>...</template>` 中；
+- 所有 helper（`i18n`、`fn`、`eq`、`concat`、`if` 等）显式 import，不再依赖隐式全局；
+- 组件状态用 `@glimmer/tracking` 的 `@tracked` 声明，`@action` 处理交互。
+
+因此插件不会触发该弃用警告，也符合 Discourse 的迁移方向。
+
+如果你此前用的是老式写法，迁移要点大致是：
+
+| 老写法（`.hbs`） | 新写法（`.gjs`） |
+| --- | --- |
+| 单独的 `templates/xxx.hbs` 文件 | 单文件 `.gjs`，模板内联 |
+| `this.foo` 访问组件状态 | `@controller.foo` / `@model` / 组件自有字段 |
+| helper 隐式全局（如 `{{i18n}}`） | 显式 `import { i18n } from "discourse-i18n"` |
+| 需要配套 Controller 文件 | 组件内 `@tracked` + `@action` 自洽 |
+
+---
+
 ## 安全设计
 
 1. **密钥不下发前端** —— `captcha_key` 使用 `secret: true`，只存在于服务端。
@@ -232,7 +342,7 @@ bundle exec rspec plugins/discourse-geetest-captcha/spec
 ```
 
 覆盖点：签名算法正确性、成功/失败/异常返回解析、超时处理、参数缺失、防重放、
-容灾降级开关。
+容灾降级开关、统计计数与聚合、管理 API 的权限校验与脱敏。
 
 ---
 
@@ -258,6 +368,25 @@ bundle exec rspec plugins/discourse-geetest-captcha/spec
 插件元数据声明 `required_version: 3.2.0`。参数白名单使用了
 `Discourse::ApplicationController.permitted`（3.x 引入），并在失败时降级为警告日志。
 
+**Q：管理页打不开 / 提示 404？**
+确认当前账号是管理员。管理路由挂了 `StaffConstraint`，非管理员一律 404（这是
+Discourse 管理接口的惯例，避免泄露路由是否存在）。另外 `/admin/plugins` 菜单里的
+入口文案来自 `geetest_captcha.admin.nav_label`，若显示为 key 说明语言文件未加载，
+重启一次应用即可。
+
+**Q：连通性测试显示「接口不可达」但实际验证能用？**
+该测试发的是**非法**请求，只用于探测网络与请求格式。若你的服务器无法直连
+`gcaptcha4.geetest.com`（如内网限制），测试会失败，但只要有其他出口能到达，
+实际验证可能仍然正常。反之若测试可达而验证总失败，请重点检查 `captcha_key` 是否正确。
+
+**Q：统计数据会是 0 吗？**
+统计只从插件启用后开始累积，且按天分桶保留 90 天。刚安装时没有数据是正常的，
+可在管理页点击「重置统计」清空后重新观察。
+
+**Q：为什么插件里没有 `.hbs` 文件？**
+因为 Discourse 已弃用 `.hbs` 扩展名（见上文
+[关于 .hbs 弃用](#关于-hbs-弃用)）。本插件使用 `.gjs` 单文件组件，不会产生该弃用警告。
+
 ---
 
 ## 参考文档
@@ -266,7 +395,8 @@ bundle exec rspec plugins/discourse-geetest-captcha/spec
 - 极验行为验证第四代 · Web API：<https://docs.geetest.com/gt4/apirefer/api/web>
 - 极验行为验证第四代 · 快速开始：<https://docs.geetest.com/gt4/handbook>
 - Discourse 开发者指南索引：<https://meta.discourse.org/t/developer-guides-index/308036>
-- Discourse 插件开发 Part 1-7：<https://meta.discourse.org/t/30515>
+- Discourse 插件开发 Part 5（管理界面）：<https://meta.discourse.org/t/31761>
+- Discourse 弃用 .hbs 扩展名：<https://meta.discourse.org/t/398896>
 - Discourse JS API：<https://meta.discourse.org/t/41281>
 - Rails autoloading in plugins：<https://meta.discourse.org/t/256092>
 

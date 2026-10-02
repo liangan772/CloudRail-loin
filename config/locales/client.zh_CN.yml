@@ -10,3 +10,54 @@ zh_CN:
       error: "验证出错，请重试。"
       closed: "验证未完成即被关闭。"
       server_failed: "人机验证未通过，请重试。"
+      admin:
+        title: "极验人机验证"
+        nav_label: "极验验证"
+        subtitle: "极验行为验证第四代（GT4）配置与运行状态"
+        loading: "加载中…"
+        refresh: "刷新"
+        save_failed: "操作失败，请重试。"
+        sections:
+          health: "配置状态"
+          scopes: "验证场景"
+          detail: "配置详情"
+          test: "连通性测试"
+          stats: "验证数据统计"
+        health_ok: "配置完整，可以正常使用"
+        health_bad: "配置不完整，请检查下列项目"
+        scopes:
+          signup: "注册"
+          login: "登录"
+          post: "发帖 / 回复"
+        detail:
+          captcha_id: "captcha_id"
+          captcha_key: "captcha_key"
+          api_server: "API 域名"
+          product: "展现形式"
+          language: "界面语言"
+          fail_open: "容灾降级"
+          show_errors: "显示失败原因"
+          enabled: "总开关"
+        values:
+          # 注意：YAML 1.1 会把裸写的 yes/no/on/off 解析成布尔值，
+          # 因此这些 key 必须加引号，否则 i18n 查找会失败。
+          "yes": "已配置"
+          "no": "未配置"
+          "on": "已开启"
+          "off": "已关闭"
+        test:
+          run: "开始测试"
+          running: "测试中…"
+          reachable: "接口可达（耗时 %{ms} ms）"
+          unreachable: "接口不可达"
+        stats:
+          pass: "验证通过"
+          fail: "验证失败"
+          degraded: "降级放行"
+          missing: "参数缺失"
+          total: "合计"
+          reset: "重置统计"
+          reset_confirm: "确定要清空所有统计数据吗？此操作不可恢复。"
+          window: "最近 %{days} 天"
+          empty: "暂无数据"
+

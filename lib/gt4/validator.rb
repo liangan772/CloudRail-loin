@@ -47,12 +47,14 @@ module ::Gt4
         extracted = extract(params)
 
         if extracted.values.any?(&:blank?)
+          Stats.record("missing")
           return Result.new(ok: false, error: :missing_params, reason: "missing params")
         end
 
         # Reject an already-consumed challenge before spending a network
         # round trip on it.
         unless VerifiedStore.claim(extracted["lot_number"])
+          Stats.record("fail")
           return Result.new(ok: false, error: :already_used, reason: "lot_number already used")
         end
 
@@ -67,6 +69,7 @@ module ::Gt4
           # Transport failure. Hand the lot_number back so a genuine
           # retry is still possible, then apply the fail-open policy.
           VerifiedStore.release(extracted["lot_number"])
+          Stats.record("degraded")
 
           return Result.new(
             ok: SiteSetting.geetest_captcha_fail_open,
@@ -77,6 +80,7 @@ module ::Gt4
 
         unless response[:ok]
           VerifiedStore.release(extracted["lot_number"])
+          Stats.record("fail")
           return Result.new(
             ok: false,
             error: :validate_failed,
@@ -85,6 +89,7 @@ module ::Gt4
           )
         end
 
+        Stats.record("pass")
         Result.new(ok: true, reason: "", captcha_args: response[:captcha_args])
       end
 

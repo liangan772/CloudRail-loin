@@ -19,3 +19,17 @@ zh_CN:
       request_failed: "无法连接验证服务。"
       validate_failed: "验证未通过。"
       invalid_challenge: "验证会话无效或已过期。"
+    admin:
+      title: "极验人机验证"
+      checks:
+        enabled: "插件总开关已开启"
+        captcha_id: "已配置 captcha_id"
+        captcha_key: "已配置 captcha_key"
+        scope: "至少启用了一个验证场景"
+      test:
+        ok: "接口可达，请求格式正确"
+        unreachable: "无法连接极验接口（%{reason}）"
+        missing_credentials: "请先填写 captcha_id 与 captcha_key"
+      errors:
+        unknown_scope: "未知的验证场景"
+
