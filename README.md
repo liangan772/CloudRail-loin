@@ -387,6 +387,41 @@ Discourse 管理接口的惯例，避免泄露路由是否存在）。另外 `/a
 因为 Discourse 已弃用 `.hbs` 扩展名（见上文
 [关于 .hbs 弃用](#关于-hbs-弃用)）。本插件使用 `.gjs` 单文件组件，不会产生该弃用警告。
 
+**Q：重建时报 `bundle exec rake db:migrate` 失败 / FAILED TO BOOTSTRAP？**
+先看完整报错。`Pups::ExecError` 本身只是「命令退出码非 0」的外壳，
+**真正的异常栈在它的上面几行**，通常是 `NameError` / `uninitialized constant`，
+并且往往指向某个插件路径。
+
+本插件从 v1.2.0 起做了启动安全加固，不会因为控制器未加载而中断 bootstrap：
+
+- 没有任何 migration 文件（不建表、不加列，统计走 Redis、配置走 SiteSetting）
+- 所有控制器常量引用都改为**运行时惰性解析**，缺失时降级为 warning 而非抛错
+- 管理控制器的类定义延迟到确认父常量存在之后
+
+如果仍失败，请按下面步骤定位：
+
+```bash
+# 1. 到宿主机上查看完整日志
+cd /var/discourse
+./launcher rebuild app 2>&1 | tee /tmp/rebuild.log
+grep -n -B 20 -A 10 "db:migrate" /tmp/rebuild.log | head -80
+
+# 2. 临时移除插件以确认是否与它相关
+#    注释掉 app.yml 里 git clone 这个插件的那一行，再 rebuild
+
+# 3. 若确认无关，用官方的诊断脚本
+./discourse-doctor
+```
+
+常见真实原因（与本插件无关的那些）：
+
+| 现象 | 原因 |
+| --- | --- |
+| `PG::UndefinedTable` / `DuplicateColumn` | 数据库状态与 migration 不一致，需人工修复 schema_migrations |
+| `NameError: uninitialized constant` + 其他插件路径 | 那个插件在加载期引用了应用常量 |
+| 磁盘空间不足 | `df -h` 检查，`/var/discourse/shared/standalone` 常被日志撑满 |
+| 迁移中途被中断 | 上一次 rebuild 被 kill，需回滚半完成的 migration |
+
 ---
 
 ## 参考文档
