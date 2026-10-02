@@ -1,0 +1,12 @@
+en:
+  js:
+    geetest_captcha:
+      title: "Human Verification"
+      verify_first: "Please complete the human verification before continuing."
+      loading: "Loading verification..."
+      load_failed: "Failed to load the verification component. Please refresh the page."
+      verified: "Verification passed."
+      reset: "Verification reset, please try again."
+      error: "Verification error, please retry."
+      closed: "Verification was closed before it was completed."
+      server_failed: "Human verification failed. Please try again."

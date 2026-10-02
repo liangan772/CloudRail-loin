@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>极验行为验证第四代 · 对接演示</title>
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --text: #1f2329;
+      --muted: #646a73;
+      --border: #e5e6eb;
+      --primary: #2468f2;
+      --primary-hover: #1c56cc;
+      --danger: #d83931;
+      --success: #2ba471;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 16px 64px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+        "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+      line-height: 1.6;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    h1 { font-size: 24px; margin: 0 0 8px; }
+    .sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card h2 { font-size: 16px; margin: 0 0 14px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      background: #fff;
+      color: var(--text);
+    }
+    input:focus { outline: 2px solid rgba(36, 104, 242, 0.25); border-color: var(--primary); }
+    .field { margin-bottom: 14px; }
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      background: var(--primary);
+      color: #fff;
+      font-size: 14px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    button:hover { background: var(--primary-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .row { display: flex; gap: 12px; align-items: center; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .log {
+      margin-top: 12px;
+      background: #f7f8fa;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 300px;
+      overflow: auto;
+      color: #333;
+    }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 100px; font-size: 12px; margin-left: 8px; }
+    .badge.ok { background: rgba(43, 164, 113, 0.12); color: var(--success); }
+    .badge.bad { background: rgba(216, 57, 49, 0.12); color: var(--danger); }
+    .mode-switch { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .mode-switch button { background: #fff; color: var(--muted); border: 1px solid var(--border); }
+    .mode-switch button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    code { background: #f2f3f5; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>极验行为验证第四代 · 对接演示</h1>
+  <p class="sub">
+    演示 <code>bind</code>（隐藏按钮）模式：用户点击提交时才唤起验证，验证通过后把
+    <code>lot_number / captcha_output / pass_token / gen_time</code> 一并提交到业务接口。
+  </p>
+
+  <div class="card">
+    <h2>1. 配置</h2>
+    <div class="field">
+      <label for="captchaId">captcha_id（必填，极验后台申请）</label>
+      <input id="captchaId" type="text" placeholder="例如 647f5ed2ed8acb4be36784e01556bb71" />
+      <div class="hint">留空时使用官方公开测试 id，可直接体验。</div>
+    </div>
+    <div class="field">
+      <label>展现形式 product</label>
+      <div class="mode-switch" id="modeSwitch">
+        <button data-mode="bind" class="active">bind 隐藏按钮</button>
+        <button data-mode="popup">popup 弹出式</button>
+        <button data-mode="float">float 浮动式</button>
+      </div>
+      <div class="hint">
+        bind 模式下不会渲染按钮，点击「登录」才唤起验证；popup / float 会在下方渲染常驻按钮。
+      </div>
+    </div>
+    <div class="row">
+      <button id="reinit">重新初始化验证码</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. 业务表单（模拟登录）</h2>
+    <form id="demoForm">
+      <div class="field">
+        <label for="username">用户名</label>
+        <input id="username" name="username" type="text" value="demo_user" />
+      </div>
+      <div class="field">
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" value="demo_pass" />
+      </div>
+      <!-- GT4 挂载点：popup / float 模式下验证按钮会插入到这里 -->
+      <div id="captcha"></div>
+      <div class="row" style="margin-top: 14px;">
+        <button type="submit" id="submitBtn">登录</button>
+        <span id="status"></span>
+      </div>
+    </form>
+    <div class="hint">
+      本地演示不会真正请求极验二次校验接口（需要服务端 <code>captcha_key</code>）。
+      这里只打印前端采集到的验证参数。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3. 验证输出</h2>
+    <div class="log" id="log">等待操作…</div>
+  </div>
+</div>
+
+<!-- 极验 gt4.js。生产环境推荐下载后自托管，避免依赖外部 CDN。 -->
+<script src="https://static.geetest.com/v4/gt4.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // 官方公开测试 id，仅用于体验。请替换为你自己后台申请的 captcha_id。
+  var FALLBACK_CAPTCHA_ID = "647f5ed2ed8acb4be36784e01556bb71";
+  var GT4_FIELDS = ["lot_number", "captcha_output", "pass_token", "gen_time"];
+
+  var logEl = document.getElementById("log");
+  var statusEl = document.getElementById("status");
+  var form = document.getElementById("demoForm");
+  var captchaIdInput = document.getElementById("captchaId");
+  var submitBtn = document.getElementById("submitBtn");
+  var modeSwitch = document.getElementById("modeSwitch");
+  var mountEl = document.getElementById("captcha");
+
+  var captchaObj = null;
+  var currentMode = "bind";
+  var captchaReady = false;
+  var verifiedPayload = null;
+
+  // ---------------------------------------------------------------- //
+  // 小工具
+  // ---------------------------------------------------------------- //
+  function log(title, data) {
+    var time = new Date().toLocaleTimeString("zh-CN");
+    var body = !data ? "" : typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    logEl.textContent += "\n[" + time + "] " + title + (body ? "\n" + body : "");
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setStatus(text, ok) {
+    if (!text) { statusEl.textContent = ""; statusEl.className = ""; return; }
+    statusEl.textContent = text;
+    statusEl.className = "badge " + (ok ? "ok" : "bad");
+  }
+
+  function currentCaptchaId() {
+    return (captchaIdInput.value || "").trim() || FALLBACK_CAPTCHA_ID;
+  }
+
+  function mirrorToForm(result) {
+    GT4_FIELDS.forEach(function (name) {
+      var input = form.querySelector('input[name="' + name + '"]');
+      if (!input) {
+        input = document.createElement("input");
+        input.type = "hidden";
+        input.name = name;
+        form.appendChild(input);
+      }
+      input.value = (result && result[name]) || "";
+    });
+  }
+
+  function clearMirrored() {
+    GT4_FIELDS.forEach(function (name) {
+      var input = form.querySelector('input[name="' + name + '"]');
+      if (input) { input.value = ""; }
+    });
+  }
+
+  function buildPayload() {
+    var payload = {
+      username: document.getElementById("username").value,
+      password: document.getElementById("password").value,
+    };
+    GT4_FIELDS.forEach(function (name) {
+      var input = form.querySelector('input[name="' + name + '"]');
+      payload[name] = input ? input.value : "";
+    });
+    return payload;
+  }
+
+  // ---------------------------------------------------------------- //
+  // 初始化验证码
+  // ---------------------------------------------------------------- //
+  function destroyCaptcha() {
+    if (captchaObj && typeof captchaObj.destroy === "function") {
+      try { captchaObj.destroy(); } catch (e) { /* 忽略销毁异常 */ }
+    }
+    captchaObj = null;
+    captchaReady = false;
+    verifiedPayload = null;
+    mountEl.innerHTML = "";
+  }
+
+  function initCaptcha() {
+    destroyCaptcha();
+    setStatus("", true);
+    clearMirrored();
+
+    if (typeof window.initGeetest4 !== "function") {
+      log("错误", "gt4.js 未加载成功，请检查网络，或下载 gt4.js 后自托管。");
+      setStatus("验证组件加载失败", false);
+      return;
+    }
+
+    var config = {
+      captchaId: currentCaptchaId(),
+      product: currentMode,
+      language: "zho",
+      protocol: window.location.protocol + "//",
+    };
+    log("初始化验证码", config);
+
+    window.initGeetest4(config, function (obj) {
+      captchaObj = obj;
+
+      obj.onReady(function () {
+        captchaReady = true;
+        log("事件 onReady", "验证 DOM 已就绪");
+      });
+
+      obj.onSuccess(function () {
+        var result = obj.getValidate();
+        verifiedPayload = result;
+        log("事件 onSuccess · 验证通过", result);
+        mirrorToForm(result);
+        setStatus("验证通过", true);
+        submitBtn.disabled = false;
+        // 验证通过后自动完成业务提交
+        submitBusinessRequest();
+      });
+
+      obj.onError(function (err) {
+        log("事件 onError", err);
+        submitBtn.disabled = false;
+        setStatus("验证出错，请重试", false);
+      });
+
+      obj.onClose(function () {
+        log("事件 onClose", "用户关闭了验证");
+        submitBtn.disabled = false;
+        setStatus("验证未完成", false);
+      });
+
+      obj.onFail(function (failObj) {
+        log("事件 onFail", failObj);
+      });
+
+      // bind（隐藏按钮）模式不支持 appendTo，需主动调用 showCaptcha()
+      if (currentMode !== "bind") {
+        obj.appendTo("#captcha");
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- //
+  // 提交拦截
+  // ---------------------------------------------------------------- //
+  function submitBusinessRequest() {
+    log("提交业务请求（演示，未真正发出）", buildPayload());
+    setStatus("验证通过并已提交（演示）", true);
+    // 真实场景：
+    // fetch("/api/login", {
+    //   method: "POST",
+    //   headers: { "Content-Type": "application/json" },
+    //   body: JSON.stringify(buildPayload()),
+    // }).then(...)
+    // 服务端用 captcha_key 做 HMAC-SHA256 签名并调用 /validate 二次校验。
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+
+    // 已带验证参数的一次提交，直接走业务逻辑
+    var lot = form.querySelector('input[name="lot_number"]');
+    if (lot && lot.value) {
+      submitBusinessRequest();
+      return;
+    }
+
+    if (currentMode !== "bind") {
+      log("提示", "请先点击页面中的验证按钮完成验证");
+      setStatus("请先完成验证", false);
+      return;
+    }
+
+    if (!captchaObj || !captchaReady) {
+      log("提示", "验证组件尚未就绪，请稍候");
+      return;
+    }
+
+    log("拦截提交", "bind 模式：唤起验证…");
+    submitBtn.disabled = true;
+    setStatus("验证中…", true);
+    captchaObj.showCaptcha();
+  });
+
+  // ---------------------------------------------------------------- //
+  // UI 事件
+  // ---------------------------------------------------------------- //
+  document.getElementById("reinit").addEventListener("click", initCaptcha);
+
+  modeSwitch.addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-mode]");
+    if (!btn) { return; }
+    currentMode = btn.dataset.mode;
+    Array.prototype.forEach.call(modeSwitch.querySelectorAll("button"), function (b) {
+      b.classList.toggle("active", b === btn);
+    });
+    log("切换展现形式", currentMode);
+    initCaptcha();
+  });
+
+  captchaIdInput.addEventListener("change", function () {
+    log("captcha_id 变更", currentCaptchaId());
+    initCaptcha();
+  });
+
+  initCaptcha();
+  log("说明", "bind 模式流程：点击「登录」→ 唤起验证 → 通过后写入隐藏域 → 提交业务请求。");
+})();
+</script>
+</body>
+</html>

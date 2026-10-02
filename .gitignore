@@ -1,0 +1,5 @@
+# Discourse plugin development
+node_modules/
+tmp/
+.DS_Store
+*.log

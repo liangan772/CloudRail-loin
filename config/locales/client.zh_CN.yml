@@ -1,0 +1,12 @@
+zh_CN:
+  js:
+    geetest_captcha:
+      title: "人机验证"
+      verify_first: "请先完成人机验证再继续操作。"
+      loading: "正在加载验证..."
+      load_failed: "验证组件加载失败，请刷新页面重试。"
+      verified: "验证通过。"
+      reset: "验证已重置，请重新验证。"
+      error: "验证出错，请重试。"
+      closed: "验证未完成即被关闭。"
+      server_failed: "人机验证未通过，请重试。"

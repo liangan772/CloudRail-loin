@@ -1,0 +1,21 @@
+zh_CN:
+  site_settings:
+    geetest_captcha_enabled: "启用极验行为验证第四代人机验证。"
+    geetest_captcha_id: "极验 captcha_id（验证 ID），在极验后台申请获得。"
+    geetest_captcha_key: "极验 captcha_key（验证 Key），仅服务端使用，不会下发到客户端。"
+    geetest_captcha_api_server: "极验二次校验 API 域名。"
+    geetest_captcha_product: "极验验证展现形式：bind（隐藏按钮）、popup（弹出式）、float（浮动式）。"
+    geetest_captcha_language: "极验验证界面语言。"
+    geetest_captcha_on_signup: "注册时启用极验人机验证。"
+    geetest_captcha_on_login: "登录时启用极验人机验证。"
+    geetest_captcha_on_post: "发帖/回复时启用极验人机验证。"
+    geetest_captcha_fail_open: "容灾降级：当极验接口异常或超时时放行请求。"
+    geetest_captcha_show_errors: "验证失败时向用户显示失败原因。"
+  geetest_captcha:
+    errors:
+      missing_params: "验证参数不完整。"
+      not_verified: "尚未完成人机验证。"
+      already_used: "该验证结果已被使用，请重新验证。"
+      request_failed: "无法连接验证服务。"
+      validate_failed: "验证未通过。"
+      invalid_challenge: "验证会话无效或已过期。"

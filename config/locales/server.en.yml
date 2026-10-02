@@ -1,0 +1,21 @@
+en:
+  site_settings:
+    geetest_captcha_enabled: "Enable GeeTest CAPTCHA v4 human verification."
+    geetest_captcha_id: "GeeTest captcha_id (verification ID), obtained from the GeeTest console."
+    geetest_captcha_key: "GeeTest captcha_key (verification key). Server-side only, never exposed to clients."
+    geetest_captcha_api_server: "GeeTest secondary validation API host."
+    geetest_captcha_product: "GeeTest widget display mode: bind (hidden button), popup, or float."
+    geetest_captcha_language: "GeeTest verification UI language."
+    geetest_captcha_on_signup: "Require GeeTest verification on signup."
+    geetest_captcha_on_login: "Require GeeTest verification on login."
+    geetest_captcha_on_post: "Require GeeTest verification when creating topics or replies."
+    geetest_captcha_fail_open: "Fail open: allow the request when the GeeTest API errors or times out."
+    geetest_captcha_show_errors: "Show the failure reason to the user when verification fails."
+  geetest_captcha:
+    errors:
+      missing_params: "Verification parameters are incomplete."
+      not_verified: "Human verification has not been completed."
+      already_used: "This verification result has already been used. Please verify again."
+      request_failed: "Unable to reach the verification service."
+      validate_failed: "Verification did not pass."
+      invalid_challenge: "The verification session is invalid or expired."

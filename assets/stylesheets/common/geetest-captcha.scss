@@ -1,0 +1,25 @@
+// GeeTest CAPTCHA v4 mount points.
+//
+// In `bind` mode GeeTest renders its own overlay, so these hosts are
+// intentionally invisible in the normal page flow. We only reserve the
+// space needed when the widget is configured as popup/float.
+
+.gt4-captcha-mount {
+  display: block;
+  width: 100%;
+  margin-top: 0.5em;
+
+  &:empty {
+    display: none;
+  }
+}
+
+// Keeps the popup/float button aligned with Discourse form controls.
+.gt4-captcha-mount .geetest_holder {
+  width: 100% !important;
+}
+
+.gt4-captcha-pending {
+  opacity: 0.6;
+  pointer-events: none;
+}

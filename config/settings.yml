@@ -1,0 +1,71 @@
+plugins:
+  geetest_captcha_enabled:
+    default: false
+    client: true
+
+  geetest_captcha_id:
+    default: ""
+    client: true
+    secret: false
+    text: "极验 captcha_id (验证 ID)"
+
+  geetest_captcha_key:
+    default: ""
+    secret: true
+    text: "极验 captcha_key (验证 Key，仅服务端使用)"
+
+  geetest_captcha_api_server:
+    default: "gcaptcha4.geetest.com"
+    text: "极验二次校验 API 域名"
+
+  geetest_captcha_product:
+    default: "bind"
+    type: enum
+    client: true
+    choices:
+      - "bind"
+      - "popup"
+      - "float"
+    text: "验证展现形式 (product)"
+
+  geetest_captcha_language:
+    default: "zho"
+    type: enum
+    client: true
+    choices:
+      - "zho"
+      - "eng"
+      - "zho-tw"
+      - "zho-hk"
+      - "jpn"
+      - "kor"
+      - "rus"
+      - "spa"
+      - "fra"
+      - "deu"
+      - "ara"
+    text: "验证界面语言 (language)"
+
+  geetest_captcha_on_signup:
+    default: true
+    client: true
+    text: "注册时启用极验人机验证"
+
+  geetest_captcha_on_login:
+    default: false
+    client: true
+    text: "登录时启用极验人机验证"
+
+  geetest_captcha_on_post:
+    default: false
+    client: true
+    text: "发帖/回复时启用极验人机验证"
+
+  geetest_captcha_fail_open:
+    default: true
+    text: "容灾降级：当极验接口异常或超时时放行请求（推荐开启，避免阻挡正常业务）"
+
+  geetest_captcha_show_errors:
+    default: true
+    client: true
+    text: "验证失败时向用户显示失败原因"
