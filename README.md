@@ -123,6 +123,7 @@ discourse-geetest-captcha/
 │   ├── validator.rb                       # 二次校验编排
 │   ├── verified_store.rb                  # 防重放
 │   ├── stats.rb                           # 验证数据统计
+│   ├── settings_registry.rb               # 设置注册表（单一事实来源）
 │   ├── connectivity_test.rb               # 连通性探针
 │   ├── controller_extension.rb            # 参数白名单 + 控制器 helper
 │   ├── guard.rb                           # 各端点挂载
@@ -132,7 +133,7 @@ discourse-geetest-captcha/
 │   │   ├── geetest-captcha-route-map.js   # 注册 /admin/plugins/geetest-captcha 路由
 │   │   ├── initializers/geetest-captcha.js
 │   │   ├── components/
-│   │   │   └── geetest-captcha-admin.gjs  # 管理界面主组件（.gjs）
+│   │   │   └── geetest-captcha-admin.gjs  # 管理界面：统一配置表单（.gjs）
 │   │   ├── templates/admin/
 │   │   │   └── plugins-geetest-captcha.gjs# 管理页模板（.gjs）
 │   │   └── lib/
@@ -146,6 +147,7 @@ discourse-geetest-captcha/
     ├── gt4_client_spec.rb
     ├── gt4_validator_spec.rb
     ├── gt4_stats_spec.rb
+    ├── gt4_settings_registry_spec.rb
     └── gt4_admin_controller_spec.rb
 ```
 
@@ -187,7 +189,9 @@ git clone https://github.com/liangan772/CloudRail-loin.git discourse-geetest-cap
 
 ## 配置项
 
-安装后在 **管理后台 → 设置 → 插件** 中搜索 `geetest` 进行配置。
+全部 11 项设置都可以在**管理后台 → 插件 → 极验验证**的统一表单里一次改完
+（见下文「管理后台界面」）。内置的 **管理后台 → 设置 → 插件** 页搜索 `geetest`
+同样可用，两处修改的是同一份数据。
 
 | 设置项 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -203,6 +207,9 @@ git clone https://github.com/liangan772/CloudRail-loin.git discourse-geetest-cap
 | `geetest_captcha_fail_open` | boolean | `true` | 接口异常时放行（容灾） |
 | `geetest_captcha_show_errors` | boolean | `true` | 向用户展示失败原因 |
 
+> 设置的**类型、分组、枚举取值与校验规则**统一定义在
+> `lib/gt4/settings_registry.rb`，管理页表单与服务端校验都由它驱动。
+
 ### 获取 captcha_id / captcha_key
 
 1. 登录 [极验产品后台](https://www.geetest.com/Register)，选择【行为验】。
@@ -214,12 +221,14 @@ git clone https://github.com/liangan772/CloudRail-loin.git discourse-geetest-cap
 
 ## 管理后台界面
 
-除了 Discourse 内置的站点设置页，插件还提供了一个可视化管理页。
-
 **入口**：管理后台 → 插件 → **极验验证**，或直接访问
 `/admin/plugins/geetest-captcha`。
 
-页面包含四块内容：
+管理页是这个插件**唯一的配置入口**：全部 11 项设置都在这里分组呈现，一次保存。
+Discourse 内置的站点设置页仍然保留（`管理后台 → 设置 → 插件` 搜索 `geetest`），
+两处改的是同一份数据，无论用哪个都不会脱节。
+
+页面包含五块内容：
 
 ### 1. 配置状态总览
 
@@ -230,10 +239,28 @@ git clone https://github.com/liangan772/CloudRail-loin.git discourse-geetest-cap
 - 是否已填写 `captcha_key`
 - 是否至少启用了一个验证场景
 
-### 2. 验证场景开关
+### 2. 统一配置表单
 
-直接在页面上切换总开关和注册 / 登录 / 发帖三个场景，**无需跳转到站点设置页**，
-点击即时生效（后端会同步重装校验拦截器）。
+所有设置按三组排列，改完点一次「保存配置」即可：
+
+| 分组 | 包含设置 |
+| --- | --- |
+| 基础配置 | 总开关、`captcha_id`、`captcha_key`、展现形式、界面语言 |
+| 验证场景 | 注册、登录、发帖 / 回复 |
+| 高级选项 | API 域名、容灾降级、显示失败原因 |
+
+表单的几个行为细节：
+
+- **合并保存**：只提交真正改动过的字段，未改动的不会被写回。
+- **`captcha_key` 留空即不改**：密钥字段永远是空的密码框，placeholder 显示
+  `已配置（647f…bb71），留空则不修改`。这样重新保存其它设置时不需要重新输入密钥，
+  密钥也从不回传到浏览器。
+- **未保存提示**：顶部有「N 项未保存」标记，底部有「撤销更改」按钮可一键还原为
+  服务端当前值。
+- **校验失败不落库**：任一字段非法（例如 `captcha_id` 含空格、枚举值不存在），
+  整批都不会写入，错误信息直接标在对应字段下方。
+- **启用前置校验**：勾选总开关时若 `captcha_id` / `captcha_key` 为空，会拒绝保存并
+  提示先填写——避免出现「插件已启用但从未生效」的静默故障。
 
 ### 3. 连通性测试
 
@@ -255,17 +282,48 @@ DNS、TLS、路由是否通畅，以及请求格式是否被接受。页面会�
 > **安全提示**：管理页返回的 `captcha_id` 会做脱敏处理（只显示前 4 位和后 4 位），
 > `captcha_key` 永不回显，只告知「已配置 / 未配置」。
 
-### 管理 API
+### 5. 管理 API
 
 所有接口都要求管理员权限（`StaffConstraint`）：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/admin/plugins/geetest-captcha/status.json` | 配置状态与健康检查 |
+| GET | `/admin/plugins/geetest-captcha/settings.json` | 读取全部设置（含表单元数据） |
+| PUT | `/admin/plugins/geetest-captcha/settings.json` | 批量保存设置 |
+| GET | `/admin/plugins/geetest-captcha/status.json` | 配置状态与健康检查（精简版） |
 | GET | `/admin/plugins/geetest-captcha/stats.json?days=7` | 统计数据 |
 | DELETE | `/admin/plugins/geetest-captcha/stats.json` | 清空统计 |
 | POST | `/admin/plugins/geetest-captcha/test.json` | 连通性测试 |
-| PUT | `/admin/plugins/geetest-captcha/toggle.json` | 切换场景开关 |
+| PUT | `/admin/plugins/geetest-captcha/toggle.json` | 切换单个场景开关（兼容保留） |
+
+批量保存示例：
+
+```bash
+curl -X PUT https://your-forum.com/admin/plugins/geetest-captcha/settings.json \
+  -H "Content-Type: application/json" \
+  -H "Api-Key: <admin-api-key>" \
+  -H "Api-Username: system" \
+  -d '{"settings":{"geetest_captcha_product":"popup","geetest_captcha_on_post":true}}'
+```
+
+成功响应会回传最新的完整设置，`changed` 里只列出真正变动的键：
+
+```json
+{ "success": true, "changed": {"geetest_captcha_on_post": true}, "settings": { }, "health": { } }
+```
+
+校验失败时返回 `422`，`errors` 是 `{设置名: [错误码]}`：
+
+```json
+{ "success": false, "errors": {"geetest_captcha_id": ["invalid_format"]} }
+```
+
+#### 设置注册表（单一事实来源）
+
+`lib/gt4/settings_registry.rb` 是这 11 项设置的唯一定义处：类型、分组、枚举取值、
+正则校验、是否脱敏，全部集中在这里。服务端据此做校验与强制转换，前端据此渲染表单，
+因此两侧永远不会对「有哪些设置、各是什么类型」产生分歧。`config/settings.yml` 仍然
+负责声明**默认值**，并有 spec 断言两者覆盖的设置项完全一致。
 
 ---
 
@@ -342,7 +400,39 @@ bundle exec rspec plugins/discourse-geetest-captcha/spec
 ```
 
 覆盖点：签名算法正确性、成功/失败/异常返回解析、超时处理、参数缺失、防重放、
-容灾降级开关、统计计数与聚合、管理 API 的权限校验与脱敏。
+容灾降级开关、统计计数与聚合、设置注册表（类型/枚举/正则/脱敏/交叉校验）、
+管理 API 的权限校验与脱敏、批量保存的原子性。
+
+具体到统一配置这块的测试：
+
+- `spec/lib/gt4_settings_registry_spec.rb` —— 断言注册表与 `config/settings.yml`
+  覆盖的设置项完全一致，并逐项验证布尔强制转换、枚举白名单、正则校验、
+  空白密钥跳过、启用时凭据必填等规则。
+- `spec/lib/gt4_admin_controller_spec.rb` —— 验证 `GET/PUT /settings.json`
+  的权限、脱敏、批量落库、**非法输入不落库**（同请求中的合法字段也不会被写入）、
+  场景变更后重装拦截器。
+
+### 离线自检（不需要 Discourse 环境）
+
+仓库里还带了一个不依赖完整 Discourse 的自检脚本，用于在本地或 CI 的早期阶段
+捕获低级错误：
+
+```bash
+bash scripts/verify.sh
+```
+
+它会依次检查：Ruby 语法、YAML 可解析、`.gjs` 能被 `content-tag` 解析（Discourse
+实际使用的 swc 解析器）、SCSS 能被 dart-sass 编译、JS 语法、**i18n key 在全部语言
+文件中的覆盖率**，以及一个**裸启动模拟**——故意不加载任何 Discourse 控制器来加载
+`plugin.rb`，确保插件的加载路径引用不到应用常量，从而不会让 `rake db:migrate`
+在启动阶段崩溃。
+
+其中 `.gjs` / SCSS / i18n / 启动模拟这几项需要辅助工具；缺失时脚本会标记为 SKIP
+而不是失败。工具的路径可以用环境变量覆盖：
+
+```bash
+VERIFY_TOOLS=/path/to/tools GJS_HELPERS=/path/to/helpers bash scripts/verify.sh
+```
 
 ---
 

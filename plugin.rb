@@ -2,7 +2,7 @@
 
 # name: discourse-geetest-captcha
 # about: GeeTest CAPTCHA v4 (极验行为验证第四代) human verification for Discourse
-# version: 1.2.0
+# version: 1.3.0
 # authors: liangan772
 # url: https://github.com/liangan772/CloudRail-loin
 # required_version: 3.2.0
@@ -42,6 +42,7 @@ after_initialize do
   require_relative "lib/gt4/client"
   require_relative "lib/gt4/verified_store"
   require_relative "lib/gt4/stats"
+  require_relative "lib/gt4/settings_registry"
   require_relative "lib/gt4/validator"
   require_relative "lib/gt4/connectivity_test"
   require_relative "lib/gt4/controller_extension"
@@ -74,6 +75,8 @@ after_initialize do
         :constraints => StaffConstraint.new
 
     scope "/admin/plugins/geetest-captcha", defaults: { format: :json } do
+      get    "/settings"          => "gt4/admin#settings",       constraints: StaffConstraint.new
+      put    "/settings"          => "gt4/admin#save_settings",  constraints: StaffConstraint.new
       get    "/status"            => "gt4/admin#status",      constraints: StaffConstraint.new
       get    "/stats"             => "gt4/admin#stats",       constraints: StaffConstraint.new
       delete "/stats"             => "gt4/admin#reset_stats", constraints: StaffConstraint.new

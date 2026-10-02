@@ -46,6 +46,13 @@ module ::Gt4
 
       def build_class
         Class.new(::Admin::AdminController) do
+          # ------------------------------------------------------------ #
+          #  Read                                                        #
+          # ------------------------------------------------------------ #
+
+          # Compact health/status snapshot used by the dashboard header.
+          # Kept for backwards compatibility with templates that only
+          # need the summary view.
           def status
             render json: {
               enabled: SiteSetting.geetest_captcha_enabled,
@@ -65,6 +72,77 @@ module ::Gt4
               health: health_report,
             }
           end
+
+          # Every setting the plugin owns, plus the metadata the form
+          # needs to render it. Secrets come back as `{ value: "", set: }`
+          # so they are never transmitted to the browser.
+          def settings
+            render json: {
+              settings: Gt4::SettingsRegistry.read_all,
+              groups: Gt4::SettingsRegistry.groups,
+              health: health_report,
+            }
+          end
+
+          # ------------------------------------------------------------ #
+          #  Write                                                       #
+          # ------------------------------------------------------------ #
+
+          # Batch save. Accepts `{ settings: { <name>: <value>, ... } }`.
+          #
+          # All validation happens before anything is persisted, so a
+          # partially-invalid form leaves the stored configuration
+          # completely untouched.
+          def save_settings
+            payload = params[:settings]
+
+            unless payload.respond_to?(:to_unsafe_h) || payload.is_a?(Hash)
+              return render_json_error(
+                       I18n.t("geetest_captcha.admin.errors.invalid_payload"),
+                       status: 400,
+                       extras: { errors: {} },
+                     )
+            end
+
+            submitted = payload.respond_to?(:to_unsafe_h) ? payload.to_unsafe_h : payload.to_h
+            updates, errors = Gt4::SettingsRegistry.build_updates(submitted)
+
+            if errors.any?
+              return render json: {
+                              success: false,
+                              errors: errors.transform_values { |msgs| msgs.map { |m| error_text(m) } },
+                              health: health_report,
+                            }, status: 422
+            end
+
+            changed = changed_keys(updates)
+
+            begin
+              Gt4::SettingsRegistry.apply!(updates)
+            rescue StandardError => e
+              Rails.logger.warn("[geetest-captcha] save_settings failed: #{e.class}: #{e.message}")
+              return render_json_error(
+                       I18n.t("geetest_captcha.admin.errors.save_failed"),
+                       status: 500,
+                       extras: { errors: {} },
+                     )
+            end
+
+            # A scope toggling on/off means the controller guards have to
+            # be re-evaluated against the new configuration.
+            Gt4::Guard.install! if (changed.keys & scope_keys).any?
+
+            render json: {
+              success: true,
+              changed: changed,
+              settings: Gt4::SettingsRegistry.read_all,
+              health: health_report,
+            }
+          end
+
+          # ------------------------------------------------------------ #
+          #  Diagnostics                                                 #
+          # ------------------------------------------------------------ #
 
           def stats
             days = params[:days].to_i
@@ -86,6 +164,8 @@ module ::Gt4
             render json: { result: Gt4::ConnectivityTest.run.to_h }
           end
 
+          # Retained so older bookmarks / third-party scripts keep working.
+          # New callers should use `save_settings`.
           def toggle
             scope = params[:scope].to_s
             value = ActiveModel::Type::Boolean.new.cast(params[:value])
@@ -112,6 +192,26 @@ module ::Gt4
           end
 
           private
+
+          def scope_keys
+            Gt4::SettingsRegistry.for_group(:scopes).map { |d| d[:key] } +
+              [:geetest_captcha_enabled]
+          end
+
+          # Only report settings whose value actually moved, so the UI can
+          # say "nothing changed" instead of pretending it saved.
+          def changed_keys(updates)
+            updates.each_with_object({}) do |(key, value), acc|
+              before = SiteSetting.public_send(key)
+              acc[key] = value unless before.to_s == value.to_s
+            end
+          end
+
+          def error_text(message)
+            key = "geetest_captcha.admin.errors.#{message}"
+            text = I18n.t(key)
+            text.to_s.start_with?("translation missing") ? message.to_s : text
+          end
 
           def configured?
             SiteSetting.geetest_captcha_id.present? &&

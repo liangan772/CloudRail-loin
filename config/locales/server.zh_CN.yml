@@ -32,4 +32,9 @@ zh_CN:
         missing_credentials: "请先填写 captcha_id 与 captcha_key"
       errors:
         unknown_scope: "未知的验证场景"
+        invalid_payload: "请求格式错误，未包含设置项。"
+        invalid_format: "格式不正确，请检查后重试。"
+        invalid_choice: "不是可选项。"
+        required_when_enabled: "启用插件时必须填写该项。"
+        save_failed: "保存配置失败，请查看服务器日志。"
 

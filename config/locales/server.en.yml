@@ -32,4 +32,9 @@ en:
         missing_credentials: "Configure captcha_id and captcha_key first"
       errors:
         unknown_scope: "Unknown verification scenario"
+        invalid_payload: "Malformed request: no settings were submitted."
+        invalid_format: "Incorrect format. Please check and try again."
+        invalid_choice: "Not a valid choice."
+        required_when_enabled: "Required when the plugin is enabled."
+        save_failed: "Failed to save the configuration. Check the server logs."
 

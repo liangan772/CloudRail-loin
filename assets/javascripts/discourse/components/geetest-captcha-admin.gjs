@@ -2,78 +2,107 @@ import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
+import { on } from "@ember/modifier";
+import { fn, concat } from "@ember/helper";
+import { eq, or, not } from "discourse/helpers/truth-helpers";
 import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { i18n } from "discourse-i18n";
 
 const BASE = "/admin/plugins/geetest-captcha";
 
+const GROUP_ORDER = ["basic", "scopes", "advanced"];
+
 /**
  * Admin dashboard body for the GeeTest CAPTCHA v4 plugin.
+ *
+ * This is the *single* configuration surface for the plugin: every site
+ * setting the plugin owns is rendered here, grouped into sections, and
+ * saved in one atomic request. The built-in Discourse settings page still
+ * works for compatibility, but nothing requires visiting it.
  *
  * Authored as a `.gjs` single-file component: the template is inline in
  * `<template>` and every helper is imported explicitly. This is the
  * forward-looking format Discourse is migrating to, and the direct
  * replacement for the deprecated `.hbs` theme/plugin template extension
  * (https://meta.discourse.org/t/398896).
- *
- * The component owns all of its data loading, so the thin route
- * template can render it with a single tag.
  */
 export default class GeetestCaptchaAdmin extends Component {
   @service dialog;
 
   @tracked loading = true;
-  @tracked status = null;
+  @tracked saving = false;
+
+  /** Server-authoritative state. */
+  @tracked server = null;
+  /** Local, editable draft. */
+  @tracked draft = {};
+
+  @tracked fieldErrors = {};
   @tracked stats = null;
   @tracked statDays = 7;
   @tracked testing = false;
   @tracked testResult = null;
-  @tracked busyScope = null;
 
   constructor() {
     super(...arguments);
     this.load();
   }
 
+  // ------------------------------------------------------------------ //
+  //  Derived state                                                     //
+  // ------------------------------------------------------------------ //
+
+  get groups() {
+    return GROUP_ORDER.filter((g) => this.fieldsForGroup(g).length > 0);
+  }
+
+  get health() {
+    return this.server?.health || null;
+  }
+
   get healthOk() {
-    return Boolean(this.status?.health?.ok);
+    return Boolean(this.health?.ok);
   }
 
   get checks() {
-    return this.status?.health?.checks || [];
+    return this.health?.checks || [];
   }
 
-  get scopes() {
-    const scopes = this.status?.scopes || {};
-    return [
-      { key: "signup", enabled: scopes.signup },
-      { key: "login", enabled: scopes.login },
-      { key: "post", enabled: scopes.post },
-    ];
+  /** Settings belonging to `group`, in server-provided order. */
+  fieldsForGroup(group) {
+    const all = this.server?.settings || {};
+    return Object.entries(all)
+      .filter(([, meta]) => meta.group === group)
+      .map(([key, meta]) => ({ key, ...meta }));
   }
 
-  get detailRows() {
-    if (!this.status) {
+  get dirtyKeys() {
+    if (!this.server) {
       return [];
     }
 
-    const label = (key) => i18n(`geetest_captcha.admin.detail.${key}`);
-    const yesNo = (value) =>
-      value
-        ? i18n("geetest_captcha.admin.values.yes")
-        : i18n("geetest_captcha.admin.values.no");
+    return Object.keys(this.server.settings).filter((key) => {
+      const meta = this.server.settings[key];
+      // A blank secret means "leave the stored value alone" — it is
+      // never considered a pending change.
+      if (meta.type === "secret" && this.draft[key] === "") {
+        return false;
+      }
+      return this.normalize(this.draft[key]) !== this.normalize(meta.value);
+    });
+  }
 
-    return [
-      { label: label("enabled"), value: this.onOff(this.status.enabled) },
-      { label: label("captcha_id"), value: this.status.captcha_id || "—" },
-      { label: label("captcha_key"), value: yesNo(this.status.captcha_key_set) },
-      { label: label("api_server"), value: this.status.api_server || "—" },
-      { label: label("product"), value: this.status.product || "—" },
-      { label: label("language"), value: this.status.language || "—" },
-      { label: label("fail_open"), value: this.onOff(this.status.fail_open) },
-      { label: label("show_errors"), value: this.onOff(this.status.show_errors) },
-    ];
+  get isDirty() {
+    return this.dirtyKeys.length > 0;
+  }
+
+  get dirtyLabel() {
+    const n = this.dirtyKeys.length;
+    if (n === 0) {
+      return null;
+    }
+    return i18n("geetest_captcha.admin.form.unsaved_count", { count: n });
   }
 
   get statCards() {
@@ -93,23 +122,104 @@ export default class GeetestCaptchaAdmin extends Component {
     return [1, 7, 30];
   }
 
-  onOff(value) {
-    return value
-      ? i18n("geetest_captcha.admin.values.on")
-      : i18n("geetest_captcha.admin.values.off");
+  /** Enum choices with a human label where we have one. */
+  choicesFor(field) {
+    return (field.choices || []).map((value) => ({
+      value,
+      label: i18n(`geetest_captcha.admin.options.${field.label}.${value}`),
+    }));
   }
+
+  normalize(value) {
+    if (value === null || value === undefined) {
+      return "";
+    }
+    return String(value);
+  }
+
+  /**
+   * Read the editable draft value for a setting.
+   *
+   * Glimmer templates cannot do `this.draft.[dynamicKey]`, so all field
+   * bindings go through this accessor instead.
+   */
+  valueFor(key) {
+    const value = this.draft[key];
+    return value === null || value === undefined ? "" : value;
+  }
+
+  isChecked(key) {
+    return this.valueFor(key) === true;
+  }
+
+  isSelected(key, candidate) {
+    return this.normalize(this.valueFor(key)) === this.normalize(candidate);
+  }
+
+  errorFor(key) {
+    return this.fieldErrors[key];
+  }
+
+  /**
+   * Human label for a setting.
+   *
+   * Scope toggles reuse the shorter `scopes.*` strings, everything else
+   * uses the `detail.*` table, so the two namespaces do not have to
+   * duplicate each other.
+   */
+  labelFor(field) {
+    const namespace =
+      field.group === "scopes" ? "scopes" : "detail";
+    return i18n(`geetest_captcha.admin.${namespace}.${field.label}`);
+  }
+
+  /** Fingerprint hint for a masked field that already has a value. */
+  placeholderFor(field) {
+    if (field.type === "secret") {
+      return field.set
+        ? i18n("geetest_captcha.admin.form.secret_placeholder_set", {
+            fingerprint: field.fingerprint,
+          })
+        : i18n("geetest_captcha.admin.form.secret_placeholder_empty");
+    }
+    return "";
+  }
+
+  helpFor(field) {
+    const key = `geetest_captcha.admin.help.${field.label}`;
+    const text = i18n(key);
+    return text.startsWith("translation missing") ? null : text;
+  }
+
+  // ------------------------------------------------------------------ //
+  //  Data loading                                                      //
+  // ------------------------------------------------------------------ //
 
   @action
   async load() {
     this.loading = true;
     try {
-      this.status = await ajax(`${BASE}/status`);
+      const response = await ajax(`${BASE}/settings`);
+      this.adoptServerState(response);
     } catch (e) {
       popupAjaxError(e);
     } finally {
       this.loading = false;
     }
     await this.loadStats();
+  }
+
+  adoptServerState(response) {
+    this.server = response;
+
+    const next = {};
+    for (const [key, meta] of Object.entries(response.settings || {})) {
+      // Secrets always start blank: we never render the stored value,
+      // and a blank submission is a no-op on the server.
+      next[key] = meta.type === "secret" ? "" : (meta.value ?? "");
+    }
+    this.draft = next;
+    this.fieldErrors = {};
   }
 
   @action
@@ -128,6 +238,95 @@ export default class GeetestCaptchaAdmin extends Component {
     await this.loadStats();
   }
 
+  // ------------------------------------------------------------------ //
+  //  Form editing                                                      //
+  // ------------------------------------------------------------------ //
+
+  @action
+  updateField(key, event) {
+    const value = event?.target ? event.target.value : event;
+    this.draft = { ...this.draft, [key]: value };
+
+    if (this.fieldErrors[key]) {
+      const { [key]: _removed, ...rest } = this.fieldErrors;
+      this.fieldErrors = rest;
+    }
+  }
+
+  @action
+  toggleField(key) {
+    this.draft = { ...this.draft, [key]: !this.draft[key] };
+    if (this.fieldErrors[key]) {
+      const { [key]: _removed, ...rest } = this.fieldErrors;
+      this.fieldErrors = rest;
+    }
+  }
+
+  @action
+  undo() {
+    if (!this.server) {
+      return;
+    }
+    this.adoptServerState(this.server);
+  }
+
+  // ------------------------------------------------------------------ //
+  //  Saving                                                            //
+  // ------------------------------------------------------------------ //
+
+  @action
+  async save() {
+    if (this.saving || !this.isDirty) {
+      return;
+    }
+
+    this.saving = true;
+    this.fieldErrors = {};
+
+    // Only send what actually changed, so an untouched secret is never
+    // transmitted.
+    const payload = {};
+    for (const key of this.dirtyKeys) {
+      payload[key] = this.draft[key];
+    }
+
+    try {
+      const response = await ajax(`${BASE}/settings`, {
+        type: "PUT",
+        data: { settings: payload },
+      });
+      this.adoptServerState(response);
+      this.flashSuccess();
+    } catch (e) {
+      const body = e?.jqXHR?.responseJSON || e?.responseJSON;
+      if (body?.errors) {
+        this.fieldErrors = Object.fromEntries(
+          Object.entries(body.errors).map(([k, v]) => [k, v.join("；")])
+        );
+        // Keep the draft intact so the admin can correct the input.
+        this.server = { ...this.server, health: body.health || this.server.health };
+      } else {
+        popupAjaxError(e);
+      }
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  flashSuccess() {
+    // Discourse's own `dialog` is a modal; for a non-blocking toast we
+    // lean on the built-in notice element when present.
+    const notice = document.createElement("div");
+    notice.className = "gt4-admin__toast";
+    notice.textContent = i18n("geetest_captcha.admin.form.saved");
+    document.body.appendChild(notice);
+    setTimeout(() => notice.remove(), 2400);
+  }
+
+  // ------------------------------------------------------------------ //
+  //  Diagnostics                                                       //
+  // ------------------------------------------------------------------ //
+
   @action
   async runTest() {
     this.testing = true;
@@ -139,43 +338,6 @@ export default class GeetestCaptchaAdmin extends Component {
       popupAjaxError(e);
     } finally {
       this.testing = false;
-    }
-  }
-
-  @action
-  async toggleScope(key) {
-    const scope = this.scopes.find((item) => item.key === key);
-    if (!scope) {
-      return;
-    }
-
-    this.busyScope = key;
-    try {
-      await ajax(`${BASE}/toggle`, {
-        type: "PUT",
-        data: { scope: key, value: !scope.enabled },
-      });
-      await this.load();
-    } catch (e) {
-      popupAjaxError(e);
-    } finally {
-      this.busyScope = null;
-    }
-  }
-
-  @action
-  async toggleEnabled() {
-    this.busyScope = "enabled";
-    try {
-      await ajax(`${BASE}/toggle`, {
-        type: "PUT",
-        data: { scope: "enabled", value: !this.status.enabled },
-      });
-      await this.load();
-    } catch (e) {
-      popupAjaxError(e);
-    } finally {
-      this.busyScope = null;
     }
   }
 
@@ -204,17 +366,24 @@ export default class GeetestCaptchaAdmin extends Component {
           <h2>{{i18n "geetest_captcha.admin.title"}}</h2>
           <p class="gt4-admin__subtitle">{{i18n "geetest_captcha.admin.subtitle"}}</p>
         </div>
-        <DButton
-          @label="geetest_captcha.admin.refresh"
-          @icon="sync"
-          @action={{this.load}}
-          class="btn-default"
-        />
+        <div class="gt4-admin__header-actions">
+          {{#if this.dirtyLabel}}
+            <span class="gt4-admin__dirty">{{this.dirtyLabel}}</span>
+          {{/if}}
+          <DButton
+            @label="geetest_captcha.admin.refresh"
+            @icon="sync"
+            @action={{this.load}}
+            @disabled={{this.saving}}
+            class="btn-default gt4-admin__refresh"
+          />
+        </div>
       </div>
 
       {{#if this.loading}}
         <div class="gt4-admin__loading">{{i18n "geetest_captcha.admin.loading"}}</div>
-      {{else if this.status}}
+      {{else if this.server}}
+        {{! ---- health banner ---- }}
         <section class="gt4-admin__card">
           <h3>{{i18n "geetest_captcha.admin.sections.health"}}</h3>
           <div class="gt4-admin__health {{if this.healthOk 'is-ok' 'is-bad'}}">
@@ -235,58 +404,122 @@ export default class GeetestCaptchaAdmin extends Component {
           </ul>
         </section>
 
-        <section class="gt4-admin__card">
-          <h3>{{i18n "geetest_captcha.admin.sections.scopes"}}</h3>
+        {{! ---- configuration form ---- }}
+        <section class="gt4-admin__card gt4-admin__card--form">
+          <h3>{{i18n "geetest_captcha.admin.sections.config"}}</h3>
 
-          <div class="gt4-admin__switch-row">
-            <span class="gt4-admin__switch-label">
-              {{i18n "geetest_captcha.admin.detail.enabled"}}
-            </span>
+          {{#each this.groups as |group|}}
+            <fieldset class="gt4-admin__group">
+              <legend class="gt4-admin__group-title">
+                {{i18n (concat "geetest_captcha.admin.groups." group)}}
+              </legend>
+
+              {{#each (this.fieldsForGroup group) as |field|}}
+                <div
+                  class="gt4-admin__field gt4-admin__field--{{field.type}}"
+                  data-setting={{field.key}}
+                >
+                  <label class="gt4-admin__field-label" for="gt4-{{field.key}}">
+                    {{this.labelFor field}}
+                    {{#if field.required}}
+                      <span class="gt4-admin__required" title="*">*</span>
+                    {{/if}}
+                  </label>
+
+                  <div class="gt4-admin__field-control">
+                    {{#if (eq field.type "boolean")}}
+                      <label class="gt4-admin__toggle">
+                        <input
+                          id="gt4-{{field.key}}"
+                          type="checkbox"
+                          checked={{this.isChecked field.key}}
+                          {{on "change" (fn this.toggleField field.key)}}
+                        />
+                        <span class="gt4-admin__toggle-text">
+                          {{if
+                            (this.isChecked field.key)
+                            (i18n "geetest_captcha.admin.values.on")
+                            (i18n "geetest_captcha.admin.values.off")
+                          }}
+                        </span>
+                      </label>
+
+                    {{else if (eq field.type "enum")}}
+                      <select
+                        id="gt4-{{field.key}}"
+                        class="gt4-admin__select"
+                        {{on "change" (fn this.updateField field.key)}}
+                      >
+                        {{#each (this.choicesFor field) as |choice|}}
+                          <option
+                            value={{choice.value}}
+                            selected={{this.isSelected field.key choice.value}}
+                          >
+                            {{choice.label}}
+                          </option>
+                        {{/each}}
+                      </select>
+
+                    {{else if (eq field.type "secret")}}
+                      <input
+                        id="gt4-{{field.key}}"
+                        type="password"
+                        autocomplete="new-password"
+                        class="gt4-admin__input"
+                        placeholder={{this.placeholderFor field}}
+                        value={{this.valueFor field.key}}
+                        {{on "input" (fn this.updateField field.key)}}
+                      />
+
+                    {{else}}
+                      <input
+                        id="gt4-{{field.key}}"
+                        type="text"
+                        class="gt4-admin__input"
+                        value={{this.valueFor field.key}}
+                        {{on "input" (fn this.updateField field.key)}}
+                      />
+                    {{/if}}
+
+                    {{#if (this.errorFor field.key)}}
+                      <p class="gt4-admin__field-error">{{this.errorFor field.key}}</p>
+                    {{else if (this.helpFor field)}}
+                      <p class="gt4-admin__field-help">{{this.helpFor field}}</p>
+                    {{/if}}
+                  </div>
+                </div>
+              {{/each}}
+            </fieldset>
+          {{/each}}
+
+          <div class="gt4-admin__form-actions">
             <DButton
               @label={{if
-                this.status.enabled
-                "geetest_captcha.admin.values.on"
-                "geetest_captcha.admin.values.off"
+                this.saving
+                "geetest_captcha.admin.form.saving"
+                "geetest_captcha.admin.form.save"
               }}
-              @action={{this.toggleEnabled}}
-              @disabled={{eq this.busyScope "enabled"}}
-              class="btn-small {{if this.status.enabled 'btn-primary' 'btn-default'}}"
+              @icon="check"
+              @action={{this.save}}
+              @disabled={{or this.saving (not this.isDirty)}}
+              class="btn-primary"
             />
-          </div>
-
-          {{#each this.scopes as |scope|}}
-            <div class="gt4-admin__switch-row">
-              <span class="gt4-admin__switch-label">
-                {{i18n (concat "geetest_captcha.admin.scopes." scope.key)}}
+            <DButton
+              @label="geetest_captcha.admin.form.undo"
+              @icon="undo"
+              @action={{this.undo}}
+              @disabled={{or this.saving (not this.isDirty)}}
+              class="btn-default"
+            />
+            {{#if this.isDirty}}
+              <span class="gt4-admin__form-hint">
+                {{i18n "geetest_captcha.admin.form.unsaved_hint"}}
               </span>
-              <DButton
-                @label={{if
-                  scope.enabled
-                  "geetest_captcha.admin.values.on"
-                  "geetest_captcha.admin.values.off"
-                }}
-                @action={{fn this.toggleScope scope.key}}
-                @disabled={{eq this.busyScope scope.key}}
-                class="btn-small {{if scope.enabled 'btn-primary' 'btn-default'}}"
-              />
-            </div>
-          {{/each}}
+            {{/if}}
+          </div>
         </section>
 
-        <section class="gt4-admin__card">
-          <h3>{{i18n "geetest_captcha.admin.sections.detail"}}</h3>
-          <table class="gt4-admin__table">
-            <tbody>
-              {{#each this.detailRows as |row|}}
-                <tr>
-                  <th>{{row.label}}</th>
-                  <td>{{row.value}}</td>
-                </tr>
-              {{/each}}
-            </tbody>
-          </table>
-        </section>
-
+        {{! ---- connectivity test ---- }}
         <section class="gt4-admin__card">
           <h3>{{i18n "geetest_captcha.admin.sections.test"}}</h3>
           <DButton
@@ -320,6 +553,7 @@ export default class GeetestCaptchaAdmin extends Component {
           {{/if}}
         </section>
 
+        {{! ---- statistics ---- }}
         <section class="gt4-admin__card">
           <div class="gt4-admin__card-head">
             <h3>{{i18n "geetest_captcha.admin.sections.stats"}}</h3>
