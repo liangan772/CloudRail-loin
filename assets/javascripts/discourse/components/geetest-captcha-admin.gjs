@@ -182,6 +182,14 @@ export default class GeetestCaptchaAdmin extends Component {
           })
         : i18n("geetest_captcha.admin.form.secret_placeholder_empty");
     }
+
+    // `captcha_id` is masked too, but is a normal text input: show the
+    // stored fingerprint as the placeholder so the admin can see *which*
+    // id is deployed without overwriting it by accident.
+    if (field.masked && field.set) {
+      return field.fingerprint;
+    }
+
     return "";
   }
 
@@ -476,6 +484,7 @@ export default class GeetestCaptchaAdmin extends Component {
                         id="gt4-{{field.key}}"
                         type="text"
                         class="gt4-admin__input"
+                        placeholder={{this.placeholderFor field}}
                         value={{this.valueFor field.key}}
                         {{on "input" (fn this.updateField field.key)}}
                       />
